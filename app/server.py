@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import logging
 import os
+import socket
 import threading
+import time
 import uuid
+import webbrowser
 from pathlib import Path
 
 import numpy as np
@@ -71,9 +75,18 @@ class TTSEngine:
             )
             self.device = device
             log.info("Model ready.")
+        except ImportError as exc:
+            log.exception("Missing dependency")
+            self.error = (
+                f"A required package is missing ({exc.name}). "
+                "Run start.sh (Mac/Linux) or start.bat (Windows) to install everything."
+            )
         except Exception as exc:  # surfaced to the UI via /api/status
             log.exception("Failed to load OmniVoice")
-            self.error = str(exc)
+            self.error = (
+                f"Could not load the OmniVoice model ({exc}). The first start needs internet "
+                "access to huggingface.co; see Troubleshooting in the README."
+            )
 
     def _require_model(self):
         if self.model is None:
@@ -133,15 +146,19 @@ def create_app(engine: TTSEngine) -> FastAPI:
     voices: dict[str, dict] = {}
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
 
+    def voice_meta_path(voice_id: str) -> Path:
+        if not voice_id.isalnum():
+            raise HTTPException(404, "Voice not found.")
+        return VOICES_DIR / f"{voice_id}.json"
+
     def get_voice(voice_id: str) -> dict:
         if voice_id in voices:
             return voices[voice_id]
         path = VOICES_DIR / f"{voice_id}.pt"
-        if path.is_file() and voice_id.isalnum():
+        if voice_id.isalnum() and path.is_file():
             from omnivoice import VoiceClonePrompt
 
-            prompt = VoiceClonePrompt.load(str(path))
-            voices[voice_id] = {"prompt": prompt, "transcript": prompt.ref_text}
+            voices[voice_id] = {"prompt": VoiceClonePrompt.load(str(path))}
             return voices[voice_id]
         raise HTTPException(404, "Voice not found. Please clone a voice first.")
 
@@ -158,8 +175,25 @@ def create_app(engine: TTSEngine) -> FastAPI:
             "languages": LANGUAGES,
         }
 
+    @app.get("/api/voices")
+    def list_voices():
+        items = []
+        for meta in VOICES_DIR.glob("*.json"):
+            try:
+                data = json.loads(meta.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (VOICES_DIR / f"{data.get('id')}.pt").is_file():
+                items.append(data)
+        items.sort(key=lambda v: v.get("created", 0), reverse=True)
+        return items
+
     @app.post("/api/clone")
-    async def clone(audio: UploadFile = File(...), transcript: str = Form("")):
+    async def clone(
+        audio: UploadFile = File(...),
+        transcript: str = Form(""),
+        name: str = Form(""),
+    ):
         raw = await audio.read()
         if len(raw) > MAX_UPLOAD_BYTES:
             raise HTTPException(413, "The audio file is too large (30 MB max).")
@@ -168,12 +202,26 @@ def create_app(engine: TTSEngine) -> FastAPI:
         prompt = engine.clone(wav, sr, transcript.strip())
         voice_id = uuid.uuid4().hex[:12]
         prompt.save(str(VOICES_DIR / f"{voice_id}.pt"))
-        voices[voice_id] = {"prompt": prompt, "transcript": prompt.ref_text}
-        return {
-            "voice_id": voice_id,
+        meta = {
+            "id": voice_id,
+            "name": name.strip()[:40] or f"Voice {time.strftime('%d %b %H:%M')}",
             "transcript": prompt.ref_text,
             "duration": round(duration, 1),
+            "created": time.time(),
         }
+        voice_meta_path(voice_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        voices[voice_id] = {"prompt": prompt}
+        return meta
+
+    @app.delete("/api/voices/{voice_id}")
+    def delete_voice(voice_id: str):
+        meta = voice_meta_path(voice_id)
+        if not meta.is_file():
+            raise HTTPException(404, "Voice not found.")
+        meta.unlink()
+        (VOICES_DIR / f"{voice_id}.pt").unlink(missing_ok=True)
+        voices.pop(voice_id, None)
+        return {"ok": True}
 
     @app.post("/api/speak")
     def speak(req: SpeakRequest):
@@ -205,16 +253,33 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--model", default="k2-fsa/OmniVoice", help="HF model id or local path")
     parser.add_argument("--device", default=None, help="cuda, mps, xpu or cpu (auto by default)")
+    parser.add_argument("--open", action="store_true", help="Open the app in your browser")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    port = find_free_port(args.host, args.port)
+    if port != args.port:
+        print(f"  Port {args.port} is busy, using {port} instead.")
+
     engine = TTSEngine(args.model, args.device)
     threading.Thread(target=engine.load, daemon=True).start()
 
     import uvicorn
 
-    print(f"\n  Voice Studio running at http://{args.host}:{args.port}\n")
-    uvicorn.run(create_app(engine), host=args.host, port=args.port, log_level="warning")
+    url = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{port}"
+    print(f"\n  Voice Studio is running at {url}  (press Ctrl+C to stop)")
+    print("  The first start downloads the OmniVoice model, which can take a few minutes.\n")
+    if args.open:
+        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+    uvicorn.run(create_app(engine), host=args.host, port=port, log_level="warning")
+
+
+def find_free_port(host: str, start: int) -> int:
+    for port in range(start, start + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            if sock.connect_ex(("127.0.0.1" if host == "0.0.0.0" else host, port)) != 0:
+                return port
+    return start
 
 
 if __name__ == "__main__":

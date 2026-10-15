@@ -5,68 +5,68 @@ It uses the open-source [OmniVoice](https://github.com/k2-fsa/OmniVoice) model (
 
 **Feature 1: voice cloning**
 
-1. Clone a voice by either **recording live** with the record button or **uploading** an existing sample (WAV, MP3, M4A, OGG, WEBM).
+1. Clone a voice by either **recording live** with the record button or **uploading** an existing sample (WAV, MP3, M4A, OGG, WEBM). Give it a name if you like. Cloned voices are saved under **My voices**, so you can reuse them later.
 2. Pick **English** or **हिन्दी (Hindi)**, edit the sample text, and hear it spoken in the cloned voice. Download the result as WAV.
 
 Nothing leaves your computer: the model runs locally and cloned voices are saved in `voices/`.
 
-## Setup
+## Quick start
 
-Requires Python 3.10+ and a few GB of free disk for the model weights.
+You need Python 3.10 to 3.13 and a few GB of free disk for the model.
+
+**Mac or Linux**
 
 ```bash
 git clone https://github.com/rahul576/ai-voice-over-voice.git
 cd ai-voice-over-voice
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+./start.sh
 ```
 
-**Install PyTorch for your hardware** (pick one):
+**Windows:** download or clone the repo, then double-click `start.bat`.
 
-```bash
-# NVIDIA GPU (CUDA 12.8)
-pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
+The first run creates a `.venv` folder, installs PyTorch and OmniVoice, and downloads the model from Hugging Face. That can take 5 to 15 minutes depending on your connection. After that, it starts in seconds. Your browser opens at http://127.0.0.1:7860 automatically. The pill in the top right says **Loading model…** and turns green when the model is ready.
 
-# Apple Silicon (M1/M2/M3/M4) or CPU-only
-pip install torch==2.8.0 torchaudio==2.8.0
-```
+On a Mac with Apple Silicon (M1 to M4), it runs on the GPU (`mps`). On Windows or Linux with an NVIDIA card, the script installs the CUDA build of PyTorch. Otherwise it runs on the CPU, which works but is slower.
 
-**Install the app:**
+### Options
 
-```bash
-pip install -r requirements.txt
-```
-
-## Run
-
-```bash
-python -m app.server
-```
-
-Open http://127.0.0.1:7860 in your browser. The first start downloads the OmniVoice model from Hugging Face; the status pill in the top right turns green when it is ready.
-
-Options:
+Pass these to `start.sh` or `start.bat`, or to `python -m app.server` if you set things up yourself:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--port` | `7860` | Port to serve on |
-| `--host` | `127.0.0.1` | Use `0.0.0.0` to open it from other devices on your network |
+| `--port` | `7860` | Port to serve on. If it is busy, the next free port is used. |
+| `--host` | `127.0.0.1` | Use `0.0.0.0` to open it from other devices on your network. |
 | `--device` | auto | `cuda`, `mps`, `xpu` or `cpu` |
 | `--model` | `k2-fsa/OmniVoice` | Hugging Face id or a local folder with the weights |
 
-If Hugging Face is slow or blocked for you, run `export HF_ENDPOINT=https://hf-mirror.com` first.
+### Manual setup
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install torch==2.8.0 torchaudio==2.8.0   # NVIDIA: add +cu128 and --extra-index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+python -m app.server --open
+```
+
+## Troubleshooting
+
+- **"Can't reach 127.0.0.1:7860"**: the app runs only while the terminal window running `start.sh` or `start.bat` is open. Check that window for errors, and use the address it prints, since it may pick another port if 7860 is busy.
+- **"Model failed to load"** in the top right: hover over it, or check the terminal, to see why. The usual cause is no internet access to Hugging Face on the first run. Try `export HF_ENDPOINT=https://hf-mirror.com` (Windows: `set HF_ENDPOINT=https://hf-mirror.com`), then start again.
+- **"Python 3.10 to 3.13 is required"**: on a Mac, run `brew install python@3.12`. On Windows, install from python.org and tick "Add python.exe to PATH".
+- **The microphone doesn't work**: allow microphone access when the browser asks. On a Mac, also check System Settings > Privacy & Security > Microphone for your browser. Recording only works on `127.0.0.1` or `localhost`, or over HTTPS.
+- **Start fresh**: delete the `.venv` folder and run the start script again.
 
 ## Tips for a good clone
 
 - Use **3 to 10 seconds** of clean speech with no music or background noise. Clips longer than 15 seconds are trimmed.
 - Record in the **same language** you want to generate. A Hindi sample gives the most natural Hindi; an English sample speaking Hindi will carry an English accent (and vice versa).
 - Fill in **"What is said in the sample?"** when you know it. When recording, it is pre-filled with the script you read. If you leave it empty, the app transcribes the sample automatically with Whisper (an extra ~1.5 GB download the first time).
-- The microphone works on `localhost`. If you open the app from another device, the browser requires HTTPS for recording, so use the upload option there.
 
 ## Project layout
 
 ```
-app/server.py        FastAPI backend wrapping OmniVoice (clone + speak endpoints)
+start.sh / start.bat One-command setup and start
+app/server.py        FastAPI backend wrapping OmniVoice (clone, speak and saved-voice endpoints)
 app/static/          The web UI (plain HTML, CSS and JavaScript, no build step)
 tests/               API tests that run without downloading the model
 voices/              Saved cloned voices (created at runtime, git-ignored)

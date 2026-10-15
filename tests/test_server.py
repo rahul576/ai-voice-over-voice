@@ -56,17 +56,18 @@ def test_clone_then_speak_hindi(tmp_path, monkeypatch):
     res = client.post(
         "/api/clone",
         files={"audio": ("s.wav", wav_bytes(5), "audio/wav")},
-        data={"transcript": "  hello there "},
+        data={"transcript": "  hello there ", "name": "Rahul"},
     )
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["transcript"] == "hello there"
+    assert body["name"] == "Rahul"
     assert body["duration"] == 5.0
-    assert (tmp_path / f"{body['voice_id']}.pt").exists()
+    assert (tmp_path / f"{body['id']}.pt").exists()
 
     res = client.post(
         "/api/speak",
-        json={"voice_id": body["voice_id"], "text": "नमस्ते दुनिया", "language": "hi", "speed": 5},
+        json={"voice_id": body["id"], "text": "नमस्ते दुनिया", "language": "hi", "speed": 5},
     )
     assert res.status_code == 200
     assert res.headers["content-type"] == "audio/wav"
@@ -85,3 +86,25 @@ def test_rejects_bad_input(tmp_path, monkeypatch):
     assert missing.status_code == 404
     lang = client.post("/api/speak", json={"voice_id": "x", "text": "hi", "language": "fr"})
     assert lang.status_code == 400
+
+
+def test_saved_voices_list_and_delete(tmp_path, monkeypatch):
+    client, _ = make_client(tmp_path, monkeypatch)
+    assert client.get("/api/voices").json() == []
+    first = client.post("/api/clone", files={"audio": ("a.wav", wav_bytes(4), "audio/wav")}).json()
+    second = client.post(
+        "/api/clone",
+        files={"audio": ("b.wav", wav_bytes(4), "audio/wav")},
+        data={"name": "मेरी आवाज़"},
+    ).json()
+    assert first["name"].startswith("Voice ")
+    assert first["transcript"] == "auto transcript"
+    listed = client.get("/api/voices").json()
+    assert [v["id"] for v in listed] == [second["id"], first["id"]]
+    assert listed[0]["name"] == "मेरी आवाज़"
+
+    assert client.delete(f"/api/voices/{first['id']}").status_code == 200
+    assert [v["id"] for v in client.get("/api/voices").json()] == [second["id"]]
+    assert not (tmp_path / f"{first['id']}.pt").exists()
+    assert client.delete("/api/voices/..%2Fetc").status_code == 404
+    assert client.delete(f"/api/voices/{first['id']}").status_code == 404

@@ -151,6 +151,8 @@ document.querySelectorAll("[data-source]").forEach((btn) => {
     activate(btn.parentElement, "data-source", state.source);
     $("pane-record").classList.toggle("hidden", state.source !== "record");
     $("pane-upload").classList.toggle("hidden", state.source !== "upload");
+    $("pane-saved").classList.toggle("hidden", state.source !== "saved");
+    $("sample-preview").classList.toggle("hidden", state.source === "saved" || !state.sampleBlob);
   });
 });
 
@@ -296,13 +298,14 @@ $("clone-btn").addEventListener("click", async () => {
     const form = new FormData();
     form.append("audio", state.sampleBlob, "sample.wav");
     form.append("transcript", $("transcript").value.trim());
+    form.append("name", $("voice-name").value.trim());
     const res = await fetch("/api/clone", { method: "POST", body: form });
     if (!res.ok) throw new Error(await apiError(res));
-    const data = await res.json();
-    state.voiceId = data.voice_id;
-    $("transcript").value = data.transcript;
-    $("voice-meta").textContent = `“${data.transcript}”`;
-    $("voice-ready").classList.remove("hidden");
+    const voice = await res.json();
+    $("transcript").value = voice.transcript;
+    $("voice-name").value = "";
+    selectVoice(voice);
+    loadVoices();
     $("step-speak").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     toast(err.message);
@@ -312,6 +315,55 @@ $("clone-btn").addEventListener("click", async () => {
     refreshButtons();
   }
 });
+
+// ---------- saved voices ----------
+
+function selectVoice(voice) {
+  state.voiceId = voice.id;
+  $("voice-title").textContent = `Using “${voice.name}”`;
+  $("voice-meta").textContent = `“${voice.transcript}”`;
+  $("voice-ready").classList.remove("hidden");
+  $("output").classList.add("hidden");
+  document.querySelectorAll(".saved-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.id === voice.id);
+  });
+  refreshButtons();
+}
+
+async function loadVoices() {
+  let list = [];
+  try {
+    list = await (await fetch("/api/voices")).json();
+  } catch {
+    return;
+  }
+  $("saved-count").textContent = list.length ? `(${list.length})` : "";
+  $("saved-empty").classList.toggle("hidden", list.length > 0);
+  const ul = $("saved-list");
+  ul.innerHTML = "";
+  for (const voice of list) {
+    const li = document.createElement("li");
+    li.className = "saved-item" + (voice.id === state.voiceId ? " active" : "");
+    li.dataset.id = voice.id;
+    li.innerHTML = `<span class="avatar"></span><div class="info"><strong></strong><div class="muted small"></div></div><button class="link">Delete</button>`;
+    li.querySelector(".avatar").textContent = (voice.name.trim()[0] || "V").toUpperCase();
+    li.querySelector("strong").textContent = voice.name;
+    li.querySelector(".info .small").textContent = `${voice.duration}s · “${voice.transcript}”`;
+    li.addEventListener("click", () => selectVoice(voice));
+    li.querySelector("button").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete “${voice.name}”?`)) return;
+      await fetch(`/api/voices/${voice.id}`, { method: "DELETE" });
+      if (state.voiceId === voice.id) {
+        state.voiceId = null;
+        $("voice-ready").classList.add("hidden");
+        refreshButtons();
+      }
+      loadVoices();
+    });
+    ul.appendChild(li);
+  }
+}
 
 // ---------- speak ----------
 
@@ -380,3 +432,4 @@ renderScript();
 renderSpeakText();
 refreshButtons();
 pollStatus();
+loadVoices();

@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Voice Studio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%237c5cff'/><stop offset='1' stop-color='%23ff6b8b'/></linearGradient></defs><rect width='32' height='32' rx='8' fill='url(%23g)'/></svg>" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -27,7 +28,8 @@
 
       <div class="segmented" role="tablist">
         <button class="seg active" data-source="record" role="tab">🎙 Record</button>
-        <button class="seg" data-source="upload" role="tab">⬆ Upload sample</button>
+        <button class="seg" data-source="upload" role="tab">⬆ Upload</button>
+        <button class="seg" data-source="saved" role="tab">★ My voices <span id="saved-count"></span></button>
       </div>
 
       <div id="pane-record" class="pane">
@@ -61,6 +63,11 @@
         </label>
       </div>
 
+      <div id="pane-saved" class="pane hidden">
+        <p id="saved-empty" class="muted small">No saved voices yet. Clone one and it will show up here.</p>
+        <ul id="saved-list" class="saved-list"></ul>
+      </div>
+
       <div id="sample-preview" class="sample hidden">
         <div class="sample-row">
           <span class="muted small" id="sample-label">Your sample</span>
@@ -71,13 +78,16 @@
           <span>What is said in the sample? <span class="muted">(optional, auto-detected if empty)</span></span>
           <textarea id="transcript" rows="2" placeholder="Leave empty to transcribe automatically"></textarea>
         </label>
-        <button id="clone-btn" class="primary">Clone voice</button>
+        <div class="row clone-row">
+          <input id="voice-name" type="text" maxlength="40" placeholder="Name this voice (optional)" />
+          <button id="clone-btn" class="primary">Clone voice</button>
+        </div>
       </div>
 
       <div id="voice-ready" class="voice-ready hidden">
         <span class="check">✓</span>
         <div>
-          <strong>Voice cloned</strong>
+          <strong id="voice-title">Voice cloned</strong>
           <div class="muted small" id="voice-meta"></div>
         </div>
       </div>
