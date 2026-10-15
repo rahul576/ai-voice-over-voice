@@ -56,6 +56,10 @@ python -m app.server --open
 - **The microphone doesn't work**: allow microphone access when the browser asks. On a Mac, also check System Settings > Privacy & Security > Microphone for your browser. Recording only works on `127.0.0.1` or `localhost`, or over HTTPS.
 - **Start fresh**: delete the `.venv` folder and run the start script again.
 
+## Try it without recording
+
+The `samples/` folder has two short test clips: `english_sample.mp3` and `hindi_sample.mp3`. Upload one on the **Upload** tab to check that everything works end to end. They are synthetic voices made with espeak-ng, so the clone will sound robotic. Your own recording will sound much better.
+
 ## Tips for a good clone
 
 - Use **3 to 10 seconds** of clean speech with no music or background noise. Clips longer than 15 seconds are trimmed.
@@ -69,6 +73,7 @@ start.sh / start.bat One-command setup and start
 app/server.py        FastAPI backend wrapping OmniVoice (clone, speak and saved-voice endpoints)
 app/static/          The web UI (plain HTML, CSS and JavaScript, no build step)
 tests/               API tests that run without downloading the model
+samples/             Two short English and Hindi test clips
 voices/              Saved cloned voices (created at runtime, git-ignored)
 ```
 
