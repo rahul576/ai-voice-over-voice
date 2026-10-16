@@ -121,7 +121,7 @@ fun ConnectCard(vm: MainViewModel) {
     Section("Connect to your computer") {
         Text(
             "Voice Studio runs the voice model on your computer. Start it there with " +
-                "./start.sh --host 0.0.0.0, keep the phone on the same Wi-Fi, and connect below.",
+                "./start.sh, keep the phone on the same Wi-Fi, and connect below.",
             style = MaterialTheme.typography.bodyMedium,
         )
         vm.connectionError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

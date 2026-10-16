@@ -110,15 +110,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             var loadedVoices = false
+            var failures = 0
             while (isActive) {
                 try {
                     val s = api!!.status()
                     status = s
                     connectionError = null
+                    failures = 0
                     if (!loadedVoices) { refreshVoices(); loadedVoices = true }
                 } catch (e: Exception) {
-                    connectionError = "Can't reach $u. Is Voice Studio running on your computer with --host 0.0.0.0?"
+                    status = null
+                    connectionError = "Can't reach $u. Is Voice Studio running on your computer and on the same Wi-Fi?"
                     loadedVoices = false
+                    // The computer may have a new Wi-Fi address, or the USB cable was unplugged: look again.
+                    if (++failures % 15 == 2) findServer()
                 }
                 delay(if (modelReady) 10_000 else 2_000)
             }

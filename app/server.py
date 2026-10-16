@@ -300,7 +300,9 @@ def create_app(engine: TTSEngine) -> FastAPI:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local OmniVoice voice studio")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--host", default="0.0.0.0", help="0.0.0.0 lets phones on your Wi-Fi connect; 127.0.0.1 keeps it on this computer"
+    )
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--model", default="k2-fsa/OmniVoice", help="HF model id or local path")
     parser.add_argument("--device", default=None, help="cuda, mps, xpu or cpu (auto by default)")
@@ -319,10 +321,22 @@ def main() -> None:
 
     url = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{port}"
     print(f"\n  Voice Studio is running at {url}  (press Ctrl+C to stop)")
+    if args.host == "0.0.0.0" and (lan := lan_address()):
+        print(f"  Phones on the same Wi-Fi can connect to http://{lan}:{port}")
     print("  The first start downloads the OmniVoice model, which can take a few minutes.\n")
     if args.open:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(engine), host=args.host, port=port, log_level="warning")
+
+
+def lan_address() -> str | None:
+    """This computer's address on the local network, for the phone app to connect to."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        try:
+            sock.connect(("192.168.0.1", 9))  # no packets are sent; this just picks the outgoing interface
+            return sock.getsockname()[0]
+        except OSError:
+            return None
 
 
 def find_free_port(host: str, start: int) -> int:

@@ -108,15 +108,11 @@ class Api(baseUrl: String) {
         const val DEFAULT_PORT = 7860
 
         /**
-         * Looks for a Voice Studio server: first on the phone itself (a USB cable with
-         * `adb reverse tcp:7860 tcp:7860`), then on the phone's Wi-Fi subnet (x.y.z.1-254).
+         * Looks for a Voice Studio server on the phone's Wi-Fi subnet (x.y.z.1-254), then on the
+         * phone itself (a USB cable with `adb reverse tcp:7860 tcp:7860`).
          */
         suspend fun discover(ports: List<Int> = (DEFAULT_PORT..DEFAULT_PORT + 3).toList()): String? =
             withContext(Dispatchers.IO) {
-                ports.firstOrNull { portOpen("127.0.0.1", it) }?.let { port ->
-                    val url = "http://127.0.0.1:$port"
-                    if (runCatching { Api(url).status() }.isSuccess) return@withContext url
-                }
                 val prefixes = NetworkInterface.getNetworkInterfaces().toList()
                     .filter { it.isUp && !it.isLoopback }
                     .flatMap { it.inetAddresses.toList() }
@@ -136,6 +132,9 @@ class Api(baseUrl: String) {
                             }
                         }
                     }.awaitAll().firstOrNull { it != null }
+                } ?: ports.firstNotNullOfOrNull { port ->
+                    val url = "http://127.0.0.1:$port"
+                    url.takeIf { portOpen("127.0.0.1", port) && runCatching { Api(url).status() }.isSuccess }
                 }
             }
 

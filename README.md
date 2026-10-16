@@ -35,7 +35,7 @@ Pass these to `start.sh` or `start.bat`, or to `python -m app.server` if you set
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--port` | `7860` | Port to serve on. If it is busy, the next free port is used. |
-| `--host` | `127.0.0.1` | Use `0.0.0.0` to open it from other devices on your network. |
+| `--host` | `0.0.0.0` | Listens on your local network so the Android app can connect. Use `127.0.0.1` to keep it on this computer only. |
 | `--device` | auto | `cuda`, `mps`, `xpu` or `cpu` |
 | `--model` | `k2-fsa/OmniVoice` | Hugging Face id or a local folder with the weights |
 
@@ -83,7 +83,7 @@ Run the tests with `pip install pytest httpx && python -m pytest`.
 
 The `android/` folder has a phone app (Kotlin + Jetpack Compose) with the same features: record live or pick a sample, English or Hindi, editable text, speed and a progress bar with the estimated time. The model is too heavy for a phone, so the app sends the work to Voice Studio running on your computer.
 
-1. Start the server so the phone can reach it: `./start.sh --host 0.0.0.0`
+1. Start the server as usual with `./start.sh`. It listens on your Wi-Fi and prints the address phones can use.
 2. Put the phone on the same Wi-Fi, open the app and tap **Find on Wi-Fi** (or type your computer's address, like `192.168.1.20:7860`).
 
 Over a USB cable you can skip the Wi-Fi step: run `adb reverse tcp:7860 tcp:7860` and the app finds the server on its own.
