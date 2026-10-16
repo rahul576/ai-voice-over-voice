@@ -115,6 +115,14 @@
 
       <button id="speak-btn" class="primary wide" disabled>Generate speech</button>
 
+      <div id="progress" class="progress hidden" role="status" aria-live="polite">
+        <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+        <div class="row between small">
+          <span id="progress-label">Generating speech…</span>
+          <span id="progress-time" class="muted"></span>
+        </div>
+      </div>
+
       <div id="output" class="output hidden">
         <audio id="output-audio" controls></audio>
         <a id="download" class="link" download="voice.wav">Download</a>

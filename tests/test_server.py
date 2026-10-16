@@ -108,3 +108,22 @@ def test_saved_voices_list_and_delete(tmp_path, monkeypatch):
     assert not (tmp_path / f"{first['id']}.pt").exists()
     assert client.delete("/api/voices/..%2Fetc").status_code == 404
     assert client.delete(f"/api/voices/{first['id']}").status_code == 404
+
+
+def test_time_estimate_learns_from_runs(tmp_path, monkeypatch):
+    client, _ = make_client(tmp_path, monkeypatch)
+    before = client.get("/api/status").json()["estimate"]
+    assert before == {"overhead": 2.0, "per_char": 0.08}  # CPU defaults
+    voice = client.post("/api/clone", files={"audio": ("a.wav", wav_bytes(4), "audio/wav")}).json()
+    res = client.post("/api/speak", json={"voice_id": voice["id"], "text": "x" * 100})
+    assert float(res.headers["X-Generation-Seconds"]) >= 0
+    after = client.get("/api/status").json()["estimate"]
+    # The fake engine is instant, so the learned per-character time drops.
+    assert after["per_char"] < before["per_char"]
+
+
+def test_time_estimator_defaults_and_scaling():
+    timer = server.TimeEstimator()
+    assert timer.estimate("cuda", 100) < timer.estimate("mps", 100) < timer.estimate("cpu", 100)
+    timer.record("mps", 100, 1.5 + 100 * 0.04)  # twice as slow as the default guess
+    assert timer.as_dict("mps")["per_char"] == 0.03

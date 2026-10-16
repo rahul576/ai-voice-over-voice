@@ -23,6 +23,8 @@ const state = {
   sampleBlob: null, // WAV blob of the reference sample
   voiceId: null,
   modelReady: false,
+  device: null,
+  estimate: { overhead: 2, per_char: 0.08 }, // refined by the server after each run
   busy: false,
 };
 
@@ -116,6 +118,9 @@ async function pollStatus() {
     pill.className = "pill";
     if (s.state === "ready") {
       state.modelReady = true;
+      state.device = s.device;
+      if (s.estimate) state.estimate = s.estimate;
+      updateCount();
       pill.classList.add("pill-ready");
       pill.textContent = `● Ready · ${s.device}`;
       refreshButtons();
@@ -374,9 +379,69 @@ function renderSpeakText() {
   updateCount();
 }
 
-function updateCount() {
-  $("char-count").textContent = `${$("speak-text").value.length} / 2000`;
+function estimateSeconds(chars) {
+  const speed = Number($("speed").value) || 1;
+  return state.estimate.overhead + (state.estimate.per_char * chars) / speed;
 }
+
+function formatSeconds(sec) {
+  sec = Math.max(0, Math.round(sec));
+  return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, "0")}s`;
+}
+
+function updateCount() {
+  const chars = $("speak-text").value.trim().length;
+  const est = state.modelReady && chars ? ` · about ${formatSeconds(Math.max(1, estimateSeconds(chars)))}` : "";
+  $("char-count").textContent = `${chars} / 2000${est}`;
+}
+
+async function refreshEstimate() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    if (s.estimate) state.estimate = s.estimate;
+  } catch {}
+  updateCount();
+}
+
+// The model gives no step-by-step progress, so the bar follows the time
+// estimate: it fills to 95% at the expected finish, then creeps towards 99%.
+const progress = {
+  start(expected) {
+    this.expected = Math.max(1, expected);
+    this.t0 = performance.now();
+    $("progress").classList.remove("hidden", "done");
+    $("progress-fill").style.width = "0";
+    $("progress-label").textContent = "Generating speech…";
+    this.tick();
+    this.timer = setInterval(() => this.tick(), 250);
+  },
+  tick() {
+    const elapsed = (performance.now() - this.t0) / 1000;
+    let pct, left;
+    if (elapsed < this.expected) {
+      pct = 95 * (elapsed / this.expected);
+      left = `about ${formatSeconds(Math.max(1, this.expected - elapsed))} left`;
+    } else {
+      const over = elapsed - this.expected;
+      pct = 95 + 4 * (1 - Math.exp(-over / this.expected));
+      left = "almost done…";
+      $("progress-label").textContent = "Taking a little longer than usual…";
+    }
+    $("progress-fill").style.width = `${pct.toFixed(1)}%`;
+    $("progress-time").textContent = `${formatSeconds(elapsed)} elapsed · ${left}`;
+  },
+  finish(ok, seconds) {
+    clearInterval(this.timer);
+    if (!ok) {
+      $("progress").classList.add("hidden");
+      return;
+    }
+    $("progress").classList.add("done");
+    $("progress-fill").style.width = "100%";
+    $("progress-label").textContent = "Done";
+    $("progress-time").textContent = `took ${formatSeconds(seconds)}`;
+  },
+};
 
 $("speak-lang").addEventListener("click", (e) => {
   const lang = e.target.closest("[data-lang]")?.dataset.lang;
@@ -393,12 +458,17 @@ $("speak-text").addEventListener("input", (e) => {
 
 $("speed").addEventListener("input", (e) => {
   $("speed-val").textContent = `${Number(e.target.value).toFixed(2)}×`;
+  updateCount();
 });
 
 $("speak-btn").addEventListener("click", async () => {
   const btn = $("speak-btn");
   state.busy = true;
   setBusy(btn, true, "Generating…");
+  $("output").classList.add("hidden");
+  progress.start(estimateSeconds($("speak-text").value.trim().length));
+  let ok = false;
+  let took = 0;
   try {
     const res = await fetch("/api/speak", {
       method: "POST",
@@ -411,6 +481,8 @@ $("speak-btn").addEventListener("click", async () => {
       }),
     });
     if (!res.ok) throw new Error(await apiError(res));
+    took = Number(res.headers.get("X-Generation-Seconds")) || (performance.now() - progress.t0) / 1000;
+    ok = true;
     const url = URL.createObjectURL(await res.blob());
     $("output-audio").src = url;
     $("download").href = url;
@@ -420,9 +492,11 @@ $("speak-btn").addEventListener("click", async () => {
   } catch (err) {
     toast(err.message);
   } finally {
+    progress.finish(ok, took);
     state.busy = false;
     setBusy(btn, false, "Generate speech");
     refreshButtons();
+    if (ok) refreshEstimate();
   }
 });
 

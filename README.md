@@ -6,7 +6,7 @@ It uses the open-source [OmniVoice](https://github.com/k2-fsa/OmniVoice) model (
 **Feature 1: voice cloning**
 
 1. Clone a voice by either **recording live** with the record button or **uploading** an existing sample (WAV, MP3, M4A, OGG, WEBM). Give it a name if you like. Cloned voices are saved under **My voices**, so you can reuse them later.
-2. Pick **English** or **हिन्दी (Hindi)**, edit the sample text, and hear it spoken in the cloned voice. Download the result as WAV.
+2. Pick **English** or **हिन्दी (Hindi)**, edit the sample text, and hear it spoken in the cloned voice. A progress bar shows the estimated time left, and the estimate learns from your machine after each run. Download the result as WAV.
 
 Nothing leaves your computer: the model runs locally and cloned voices are saved in `voices/`.
 

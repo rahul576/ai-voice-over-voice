@@ -42,6 +42,38 @@ class SpeakRequest(BaseModel):
     speed: float = 1.0
 
 
+class TimeEstimator:
+    """Predicts how long speech generation takes: fixed overhead + seconds per character.
+
+    Starts from rough per-device guesses and learns from each finished run,
+    so estimates match the user's own machine after a generation or two.
+    """
+
+    # (overhead seconds, seconds per character) before anything is measured
+    DEFAULTS = {"cuda": (0.5, 0.004), "xpu": (1.0, 0.01), "mps": (1.5, 0.02), "cpu": (2.0, 0.08)}
+
+    def __init__(self):
+        self.per_char: dict[str, float] = {}
+
+    def _params(self, device: str | None) -> tuple[float, float]:
+        overhead, per_char = self.DEFAULTS.get((device or "cpu").split(":")[0], self.DEFAULTS["cpu"])
+        return overhead, self.per_char.get(device or "cpu", per_char)
+
+    def estimate(self, device: str | None, chars: int) -> float:
+        overhead, per_char = self._params(device)
+        return overhead + per_char * chars
+
+    def record(self, device: str | None, chars: int, seconds: float) -> None:
+        overhead, per_char = self._params(device)
+        observed = max(seconds - overhead, 0.0) / max(chars, 1)
+        # Weighted average so one odd run doesn't swing the estimate too far.
+        self.per_char[device or "cpu"] = 0.5 * per_char + 0.5 * observed
+
+    def as_dict(self, device: str | None) -> dict:
+        overhead, per_char = self._params(device)
+        return {"overhead": round(overhead, 3), "per_char": round(per_char, 5)}
+
+
 class TTSEngine:
     """Loads OmniVoice once in the background and serialises access to it."""
 
@@ -143,6 +175,7 @@ def read_audio(raw: bytes) -> tuple[np.ndarray, int]:
 
 def create_app(engine: TTSEngine) -> FastAPI:
     app = FastAPI(title="Voice Studio")
+    timer = TimeEstimator()
     voices: dict[str, dict] = {}
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -173,6 +206,7 @@ def create_app(engine: TTSEngine) -> FastAPI:
             "device": engine.device,
             "error": engine.error,
             "languages": LANGUAGES,
+            "estimate": timer.as_dict(engine.device),
         }
 
     @app.get("/api/voices")
@@ -234,10 +268,18 @@ def create_app(engine: TTSEngine) -> FastAPI:
             raise HTTPException(400, "Language must be English or Hindi.")
         voice = get_voice(req.voice_id)
         speed = min(max(req.speed, 0.5), 2.0)
+        started = time.monotonic()
         wav, sr = engine.speak(voice["prompt"], text, req.language, speed)
+        elapsed = time.monotonic() - started
+        # Slower speech means more audio to generate, so scale by speed.
+        timer.record(engine.device, round(len(text) / speed), elapsed)
         buf = io.BytesIO()
         sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
-        return Response(buf.getvalue(), media_type="audio/wav")
+        return Response(
+            buf.getvalue(),
+            media_type="audio/wav",
+            headers={"X-Generation-Seconds": f"{elapsed:.2f}"},
+        )
 
     @app.exception_handler(HTTPException)
     async def http_error(_, exc: HTTPException):
