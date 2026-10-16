@@ -343,6 +343,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setText(t: String) { texts[language] = t }
 
+    /** Dictated text replaces the untouched sample text, otherwise it's added to the end. */
+    fun addDictatedText(spoken: String) {
+        val current = text.trim()
+        texts[language] = if (current.isEmpty() || current == SAMPLE_TEXTS[language]) spoken else "$current $spoken"
+    }
+
     fun resetText() { texts[language] = SAMPLE_TEXTS[language].orEmpty() }
 
     fun estimateSeconds(chars: Int = text.trim().length): Double {

@@ -1,12 +1,14 @@
 package com.voicestudio.app
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -343,6 +345,21 @@ fun VoicePicker(vm: MainViewModel) {
 @Composable
 fun SpeakCard(vm: MainViewModel) {
     val context = LocalContext.current
+    // Speech to text with the phone's recogniser (Google's on most phones), so long texts needn't be typed.
+    val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(vm::addDictatedText)
+    }
+    fun dictate() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (vm.language == "hi") "hi-IN" else "en-IN")
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, if (vm.language == "hi") "बोलिए…" else "Speak now…")
+        try {
+            dictation.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+            vm.message = "Speech to text isn't available on this phone. Install or update the Google app."
+        }
+    }
     Section("Generate speech") {
         VoicePicker(vm)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -358,7 +375,10 @@ fun SpeakCard(vm: MainViewModel) {
             label = { Text("Text to speak") },
             supportingText = { Text("${vm.text.length} / 2000") },
             trailingIcon = {
-                IconButton(onClick = vm::resetText) { Icon(Icons.Default.Refresh, "Reset to sample text") }
+                Row {
+                    IconButton(onClick = ::dictate, enabled = !vm.generating) { Icon(Icons.Default.Mic, "Speak to type") }
+                    IconButton(onClick = vm::resetText) { Icon(Icons.Default.Refresh, "Reset to sample text") }
+                }
             },
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
