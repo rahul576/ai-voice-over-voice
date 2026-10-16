@@ -175,6 +175,15 @@ def read_audio(raw: bytes) -> tuple[np.ndarray, int]:
 
 def create_app(engine: TTSEngine) -> FastAPI:
     app = FastAPI(title="Voice Studio")
+
+    @app.middleware("http")
+    async def no_stale_ui(request, call_next):
+        # Make browsers re-check the UI files so an update shows up on a normal reload.
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     timer = TimeEstimator()
     voices: dict[str, dict] = {}
     VOICES_DIR.mkdir(parents=True, exist_ok=True)

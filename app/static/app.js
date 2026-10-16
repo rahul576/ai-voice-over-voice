@@ -391,8 +391,8 @@ function formatSeconds(sec) {
 
 function updateCount() {
   const chars = $("speak-text").value.trim().length;
-  const est = state.modelReady && chars ? ` · about ${formatSeconds(Math.max(1, estimateSeconds(chars)))}` : "";
-  $("char-count").textContent = `${chars} / 2000${est}`;
+  $("char-count").textContent = `${chars} / 2000`;
+  if (progress.mode !== "running") progress.idle(chars);
 }
 
 async function refreshEstimate() {
@@ -400,16 +400,29 @@ async function refreshEstimate() {
     const s = await (await fetch("/api/status")).json();
     if (s.estimate) state.estimate = s.estimate;
   } catch {}
-  updateCount();
 }
 
 // The model gives no step-by-step progress, so the bar follows the time
 // estimate: it fills to 95% at the expected finish, then creeps towards 99%.
 const progress = {
+  mode: "idle",
+  // Before generating: an empty bar with the estimated time for the current text.
+  idle(chars) {
+    this.mode = "idle";
+    $("progress").classList.remove("done");
+    $("progress-fill").style.width = "0";
+    $("progress-time").textContent = "";
+    $("progress-label").textContent = !state.modelReady
+      ? "Estimated time shows once the model is ready"
+      : chars
+        ? `Estimated time: about ${formatSeconds(Math.max(1, estimateSeconds(chars)))}`
+        : "Type some text to see the estimated time";
+  },
   start(expected) {
+    this.mode = "running";
     this.expected = Math.max(1, expected);
     this.t0 = performance.now();
-    $("progress").classList.remove("hidden", "done");
+    $("progress").classList.remove("done");
     $("progress-fill").style.width = "0";
     $("progress-label").textContent = "Generating speech…";
     this.tick();
@@ -433,9 +446,10 @@ const progress = {
   finish(ok, seconds) {
     clearInterval(this.timer);
     if (!ok) {
-      $("progress").classList.add("hidden");
+      this.idle($("speak-text").value.trim().length);
       return;
     }
+    this.mode = "done"; // stays until the text, language or speed changes
     $("progress").classList.add("done");
     $("progress-fill").style.width = "100%";
     $("progress-label").textContent = "Done";
