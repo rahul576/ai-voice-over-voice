@@ -33,6 +33,8 @@ VOICES_DIR = Path(os.environ.get("VOICES_DIR", ROOT.parent / "voices"))
 LANGUAGES = {"en": "English", "hi": "Hindi"}
 MAX_TEXT_CHARS = 2000
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
+MAX_SAMPLE_SECONDS = 60  # longer recordings are accepted, the model then keeps the best 20s or less
+MODEL_REF_SECONDS = 20  # OmniVoice trims references longer than this
 
 
 class SpeakRequest(BaseModel):
@@ -173,6 +175,24 @@ def read_audio(raw: bytes) -> tuple[np.ndarray, int]:
     return wav, sr
 
 
+def clean_audio(wav: np.ndarray, sr: int) -> np.ndarray:
+    """Removes rumble and background noise (fans, traffic, room hum) from a voice sample."""
+    import noisereduce
+    from scipy.signal import butter, sosfilt
+
+    wav = sosfilt(butter(4, 80, btype="highpass", fs=sr, output="sos"), wav).astype(np.float32)
+    # Non-stationary mode also handles noise that changes over time, like a TV or traffic.
+    wav = noisereduce.reduce_noise(y=wav, sr=sr, stationary=False, prop_decrease=0.9).astype(np.float32)
+    peak = float(np.max(np.abs(wav))) or 1.0
+    return wav * (0.95 / peak)
+
+
+def wav_bytes(wav: np.ndarray, sr: int) -> bytes:
+    buf = io.BytesIO()
+    sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
 def create_app(engine: TTSEngine) -> FastAPI:
     app = FastAPI(title="Voice Studio")
 
@@ -237,13 +257,21 @@ def create_app(engine: TTSEngine) -> FastAPI:
         audio: UploadFile = File(...),
         transcript: str = Form(""),
         name: str = Form(""),
+        denoise: bool = Form(True),
     ):
         raw = await audio.read()
         if len(raw) > MAX_UPLOAD_BYTES:
             raise HTTPException(413, "The audio file is too large (30 MB max).")
         wav, sr = read_audio(raw)
+        wav = wav[: sr * MAX_SAMPLE_SECONDS]
+        if denoise:
+            wav = clean_audio(wav, sr)
         duration = wav.size / sr
-        prompt = engine.clone(wav, sr, transcript.strip())
+        text = transcript.strip()
+        if duration > MODEL_REF_SECONDS:
+            # The model will cut the clip down, so a transcript of all of it would no longer match.
+            text = ""
+        prompt = engine.clone(wav, sr, text)
         voice_id = uuid.uuid4().hex[:12]
         prompt.save(str(VOICES_DIR / f"{voice_id}.pt"))
         # Keep the reference clip so it can be played back from My voices.
@@ -258,6 +286,15 @@ def create_app(engine: TTSEngine) -> FastAPI:
         voice_meta_path(voice_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         voices[voice_id] = {"prompt": prompt}
         return {**meta, "has_sample": True}
+
+    @app.post("/api/clean")
+    async def clean(audio: UploadFile = File(...)):
+        """Returns the sample with background noise removed, so it can be previewed before saving."""
+        raw = await audio.read()
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "The audio file is too large (30 MB max).")
+        wav, sr = read_audio(raw)
+        return Response(wav_bytes(clean_audio(wav[: sr * MAX_SAMPLE_SECONDS], sr), sr), media_type="audio/wav")
 
     @app.get("/api/voices/{voice_id}/sample")
     def voice_sample(voice_id: str):
@@ -293,10 +330,8 @@ def create_app(engine: TTSEngine) -> FastAPI:
         elapsed = time.monotonic() - started
         # Slower speech means more audio to generate, so scale by speed.
         timer.record(engine.device, round(len(text) / speed), elapsed)
-        buf = io.BytesIO()
-        sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
         return Response(
-            buf.getvalue(),
+            wav_bytes(wav, sr),
             media_type="audio/wav",
             headers={"X-Generation-Seconds": f"{elapsed:.2f}"},
         )

@@ -28,8 +28,12 @@ val SAMPLE_TEXTS = mapOf(
 
 /** Something to read aloud while recording, so the sample has clear speech. */
 val READ_ALOUD = mapOf(
-    "en" to "The quick brown fox jumps over the lazy dog. I love exploring new places and meeting new people every day.",
-    "hi" to "नमस्ते, आज मौसम बहुत सुहाना है। मुझे नई जगहों पर घूमना और नए लोगों से मिलना बहुत पसंद है।",
+    "en" to "The quick brown fox jumps over the lazy dog. I love exploring new places and meeting new people every day. " +
+        "On weekends I like to cook for my family, read a good book, or take a long walk in the park. " +
+        "Sometimes it rains all afternoon, and that is the perfect time for a hot cup of tea and a quiet conversation.",
+    "hi" to "नमस्ते, आज मौसम बहुत सुहाना है। मुझे नई जगहों पर घूमना और नए लोगों से मिलना बहुत पसंद है। " +
+        "छुट्टी के दिन मैं परिवार के लिए खाना बनाता हूँ, कोई अच्छी किताब पढ़ता हूँ, या पार्क में लंबी सैर करता हूँ। " +
+        "कभी-कभी पूरी दोपहर बारिश होती है, और तब गरम चाय के साथ आराम से बातें करने का मज़ा ही कुछ और है।",
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -72,6 +76,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var cloning by mutableStateOf(false)
         private set
     var voiceName by mutableStateOf("")
+    var denoise by mutableStateOf(true)
+    var cleaning by mutableStateOf(false)
+        private set
+    private var cleanedPreview: File? = null
     var transcript by mutableStateOf("")
 
     // Speech
@@ -192,7 +200,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         uploadingId = l.localId
         try {
             val wav = withContext(Dispatchers.IO) { store.wavFile(l.localId).readBytes() }
-            val v = a.clone(wav, l.name, l.transcript)
+            val v = a.clone(wav, l.name, l.transcript, l.denoise)
             val updated = l.copy(serverId = v.id)
             withContext(Dispatchers.IO) { store.save(updated) }
             localVoices[localVoices.indexOfFirst { it.localId == l.localId }] = updated
@@ -268,6 +276,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         sample = s
+        cleanedPreview = null
         sampleLabel = "$label · ${"%.1f".format(s.seconds)}s"
         voiceName = randomVoiceName()
     }
@@ -284,10 +293,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (playingId == PLAY_PREVIEW) stopPlayback() else play(f, PLAY_PREVIEW)
     }
 
+    /** Plays the sample with background noise removed, cleaned by the server. */
+    fun previewCleaned() {
+        if (playingId == PLAY_CLEANED) { stopPlayback(); return }
+        val s = sample ?: return
+        val a = api ?: return
+        cleanedPreview?.let { play(it, PLAY_CLEANED); return }
+        cleaning = true
+        viewModelScope.launch {
+            try {
+                val f = File(getApplication<Application>().cacheDir, "sample-cleaned.wav")
+                f.writeBytes(a.clean(withContext(Dispatchers.Default) { s.toWav() }))
+                if (sample === s) { cleanedPreview = f; play(f, PLAY_CLEANED) }
+            } catch (e: Exception) {
+                message = "Could not clean the sample: ${e.message}"
+            } finally {
+                cleaning = false
+            }
+        }
+    }
+
     fun toggleVoiceSample(item: VoiceItem) {
         if (playingId == item.key) { stopPlayback(); return }
+        // The server's copy is the cleaned one; the phone's copy is the raw recording, used offline.
         val local = item.local?.let { store.wavFile(it.localId) }
-        if (local != null) { play(local, item.key); return }
+        if (local != null && item.server?.hasSample != true) { play(local, item.key); return }
         val v = item.server ?: return
         val a = api ?: return
         val f = File(getApplication<Application>().cacheDir, "voice-${v.id}.wav")
@@ -312,7 +342,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         cloning = true
         viewModelScope.launch {
             val name = voiceName.trim().ifEmpty { randomVoiceName() }
-            val l = withContext(Dispatchers.IO) { store.add(s, name, transcript.trim()) }
+            val l = withContext(Dispatchers.IO) { store.add(s, name, transcript.trim(), denoise) }
             localVoices.add(0, l)
             if (playingId == PLAY_PREVIEW) stopPlayback()
             sample = null
@@ -436,6 +466,7 @@ data class VoiceItem(val key: String, val name: String, val duration: Double, va
 
 const val PLAY_RESULT = "result"
 const val PLAY_PREVIEW = "preview"
+const val PLAY_CLEANED = "cleaned"
 
 fun formatSeconds(s: Double): String =
     if (s < 60) "${s.toInt().coerceAtLeast(1)}s" else "${(s / 60).toInt()}m ${(s % 60).toInt()}s"

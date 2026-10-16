@@ -68,11 +68,12 @@ class Api(baseUrl: String) {
         (0 until arr.length()).map { parseVoice(arr.getJSONObject(it)) }
     }
 
-    suspend fun clone(wav: ByteArray, name: String, transcript: String): Voice = withContext(Dispatchers.IO) {
+    suspend fun clone(wav: ByteArray, name: String, transcript: String, denoise: Boolean): Voice = withContext(Dispatchers.IO) {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("audio", "sample.wav", wav.toRequestBody("audio/wav".toMediaType()))
             .addFormDataPart("name", name)
             .addFormDataPart("transcript", transcript)
+            .addFormDataPart("denoise", denoise.toString())
             .build()
         val req = Request.Builder().url("$baseUrl/api/clone").post(body).build()
         parseVoice(JSONObject(call(req).string()))
@@ -80,6 +81,14 @@ class Api(baseUrl: String) {
 
     suspend fun deleteVoice(id: String) = withContext(Dispatchers.IO) {
         call(Request.Builder().url("$baseUrl/api/voices/$id").delete().build()).close()
+    }
+
+    /** The sample with background noise removed, for a preview before saving. */
+    suspend fun clean(wav: ByteArray): ByteArray = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("audio", "sample.wav", wav.toRequestBody("audio/wav".toMediaType()))
+            .build()
+        call(Request.Builder().url("$baseUrl/api/clean").post(body).build()).bytes()
     }
 
     /** The recorded clip a voice was cloned from. */

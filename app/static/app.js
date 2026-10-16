@@ -11,7 +11,7 @@ const SAMPLE_TEXTS = {
 };
 
 const TARGET_RATE = 24000; // OmniVoice works at 24 kHz
-const MAX_SECONDS = 15;     // longer references slow things down and don't help
+const MAX_SECONDS = 60;     // the server cleans the noise and the model keeps the best 20s or less
 
 const $ = (id) => document.getElementById(id);
 
@@ -285,7 +285,7 @@ async function useSample(blob, label, transcript) {
   $("sample-preview").classList.remove("hidden");
   $("voice-ready").classList.add("hidden");
   $("output").classList.add("hidden");
-  if (wav.trimmed) toast(`Using the first ${MAX_SECONDS} seconds. 3–10 seconds works best.`);
+  if (wav.trimmed) toast(`Using the first ${MAX_SECONDS} seconds. 10 to 20 seconds of clear speech works best.`);
   refreshButtons();
 }
 

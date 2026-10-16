@@ -216,7 +216,7 @@ fun RecordCard(vm: MainViewModel) {
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                "Recording ${"%.1f".format(vm.recordSeconds)}s / ${MAX_SAMPLE_SECONDS}s · 3 to 10 seconds works best",
+                "Recording ${"%.0f".format(vm.recordSeconds)}s / ${MAX_SAMPLE_SECONDS}s · 10 to 20 seconds of clear speech works best",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,7 +230,11 @@ fun RecordCard(vm: MainViewModel) {
                 }
             }
         } else if (vm.sample == null) {
-            Text("Record yourself for 3 to 10 seconds, or pick an existing voice sample.", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Record yourself for 10 to 20 seconds (up to a minute), or pick an existing voice sample. " +
+                    "Background noise is cleaned up before cloning.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = vm::prepareRecording) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(6.dp)); Text("Record") }
                 OutlinedButton(onClick = { picker.launch("audio/*") }) {
@@ -245,6 +249,24 @@ fun RecordCard(vm: MainViewModel) {
                 }
                 Text(vm.sampleLabel, Modifier.weight(1f).padding(start = 8.dp))
                 TextButton(onClick = vm::clearSample, enabled = !vm.cloning) { Text("Discard") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Remove background noise")
+                    Text("Cleans fans, traffic and room hum", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = vm.denoise, onCheckedChange = { vm.denoise = it })
+            }
+            if (vm.denoise) {
+                OutlinedButton(onClick = vm::previewCleaned, enabled = vm.status != null && !vm.cleaning) {
+                    when {
+                        vm.cleaning -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        vm.playingId == PLAY_CLEANED -> Icon(Icons.Default.Stop, null)
+                        else -> Icon(Icons.Default.AutoFixHigh, null)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (vm.status == null) "Hear cleaned version (needs the server)" else "Hear cleaned version")
+                }
             }
             OutlinedTextField(
                 vm.voiceName, { vm.voiceName = it }, Modifier.fillMaxWidth(),

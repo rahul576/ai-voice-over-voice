@@ -16,6 +16,8 @@ data class LocalVoice(
     val duration: Double,
     val created: Long,
     val serverId: String? = null,
+    /** Ask the server to remove background noise when it uploads. */
+    val denoise: Boolean = true,
 )
 
 class LocalVoices(context: Context) {
@@ -28,11 +30,11 @@ class LocalVoices(context: Context) {
         .filter { wavFile(it.localId).isFile }
         .sortedByDescending { it.created }
 
-    fun add(sample: Sample, name: String, transcript: String): LocalVoice {
+    fun add(sample: Sample, name: String, transcript: String, denoise: Boolean): LocalVoice {
         val v = LocalVoice(
             localId = UUID.randomUUID().toString().replace("-", "").take(12),
             name = name, transcript = transcript, duration = sample.seconds,
-            created = System.currentTimeMillis(),
+            created = System.currentTimeMillis(), denoise = denoise,
         )
         wavFile(v.localId).writeBytes(sample.toWav())
         save(v)
@@ -41,7 +43,7 @@ class LocalVoices(context: Context) {
 
     fun save(v: LocalVoice) {
         val o = JSONObject().put("localId", v.localId).put("name", v.name).put("transcript", v.transcript)
-            .put("duration", v.duration).put("created", v.created).put("serverId", v.serverId)
+            .put("duration", v.duration).put("created", v.created).put("serverId", v.serverId).put("denoise", v.denoise)
         File(dir, "${v.localId}.json").writeText(o.toString())
     }
 
@@ -57,6 +59,7 @@ class LocalVoices(context: Context) {
         duration = o.optDouble("duration", 0.0),
         created = o.optLong("created"),
         serverId = if (o.isNull("serverId")) null else o.optString("serverId").ifEmpty { null },
+        denoise = o.optBoolean("denoise", true),
     )
 }
 

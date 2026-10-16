@@ -13,8 +13,8 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** Longer references slow cloning down and don't help, same limit as the web app. */
-const val MAX_SAMPLE_SECONDS = 15
+/** Same limit as the server; the model itself keeps the best 20 seconds or less. */
+const val MAX_SAMPLE_SECONDS = 60
 const val MIN_SAMPLE_SECONDS = 3
 
 class Sample(val pcm: ShortArray, val sampleRate: Int) {
