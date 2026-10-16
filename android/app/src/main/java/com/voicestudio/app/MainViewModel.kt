@@ -28,12 +28,8 @@ val SAMPLE_TEXTS = mapOf(
 
 /** Something to read aloud while recording, so the sample has clear speech. */
 val READ_ALOUD = mapOf(
-    "en" to "The quick brown fox jumps over the lazy dog. I love exploring new places and meeting new people every day. " +
-        "On weekends I like to cook for my family, read a good book, or take a long walk in the park. " +
-        "Sometimes it rains all afternoon, and that is the perfect time for a hot cup of tea and a quiet conversation.",
-    "hi" to "नमस्ते, आज मौसम बहुत सुहाना है। मुझे नई जगहों पर घूमना और नए लोगों से मिलना बहुत पसंद है। " +
-        "छुट्टी के दिन मैं परिवार के लिए खाना बनाता हूँ, कोई अच्छी किताब पढ़ता हूँ, या पार्क में लंबी सैर करता हूँ। " +
-        "कभी-कभी पूरी दोपहर बारिश होती है, और तब गरम चाय के साथ आराम से बातें करने का मज़ा ही कुछ और है।",
+    "en" to "The quick brown fox jumps over the lazy dog. I love exploring new places and meeting new people every day.",
+    "hi" to "नमस्ते, आज मौसम बहुत सुहाना है। मुझे नई जगहों पर घूमना और नए लोगों से मिलना बहुत पसंद है।",
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
