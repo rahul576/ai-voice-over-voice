@@ -45,8 +45,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var searching by mutableStateOf(false)
         private set
 
-    // Voices
+    // Voices: [voices] are on the server, [localVoices] are samples kept on the phone.
     val voices = mutableStateListOf<Voice>()
+    private val store = LocalVoices(app)
+    val localVoices = mutableStateListOf<LocalVoice>().apply { addAll(store.all()) }
+    var uploadingId by mutableStateOf<String?>(null)
+        private set
+    private var voicesLoaded = false
     var selectedVoiceId by mutableStateOf<String?>(prefs.getString("voice_id", null))
 
     // Sample to clone
@@ -54,8 +59,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var sampleLabel by mutableStateOf("")
         private set
+    /** Tapped Record but not started yet: shows the text to read and a Start button. */
+    var readyToRecord by mutableStateOf(false)
+        private set
     var recording by mutableStateOf(false)
         private set
+    private var cancelled = false
     var recordSeconds by mutableStateOf(0.0)
         private set
     var recordLevel by mutableStateOf(0f)
@@ -121,8 +130,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     connectionError = null
                     failures = 0
                     if (!loadedVoices) { refreshVoices(); loadedVoices = true }
+                    else if (modelReady && uploadingId == null && localVoices.any { it.serverId == null }) uploadPending()
                 } catch (e: Exception) {
                     status = null
+                    voicesLoaded = false
                     connectionError = "Can't reach $u. Is Voice Studio running on your computer and on the same Wi-Fi?"
                     loadedVoices = false
                     // The computer may have a new Wi-Fi address, or the USB cable was unplugged: look again.
@@ -149,7 +160,50 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val list = api?.voices() ?: return
         voices.clear()
         voices.addAll(list)
+        voicesLoaded = true
         if (voices.none { it.id == selectedVoiceId }) selectVoice(voices.firstOrNull()?.id)
+        uploadPending()
+    }
+
+    /** One row per voice in My voices, merging what's on the phone with what's on the server. */
+    val myVoices: List<VoiceItem>
+        get() {
+            val local = localVoices.map { l -> VoiceItem(l.localId, l.name, l.duration, voices.firstOrNull { it.id == l.serverId }, l) }
+            val linked = localVoices.mapNotNull { it.serverId }.toSet()
+            val remote = voices.filter { it.id !in linked }.map { VoiceItem(it.id, it.name, it.duration, it, null) }
+            return local + remote
+        }
+
+    /** Sends samples that were saved while the server was unreachable. */
+    private fun uploadPending() = viewModelScope.launch {
+        for (l in localVoices.filter { it.serverId == null }) {
+            if (!modelReady) break
+            upload(l, quiet = true)
+        }
+    }
+
+    fun upload(item: VoiceItem) {
+        item.local?.let { viewModelScope.launch { upload(it, quiet = false) } }
+    }
+
+    private suspend fun upload(l: LocalVoice, quiet: Boolean) {
+        val a = api ?: return
+        if (uploadingId != null) return
+        uploadingId = l.localId
+        try {
+            val wav = withContext(Dispatchers.IO) { store.wavFile(l.localId).readBytes() }
+            val v = a.clone(wav, l.name, l.transcript)
+            val updated = l.copy(serverId = v.id)
+            withContext(Dispatchers.IO) { store.save(updated) }
+            localVoices[localVoices.indexOfFirst { it.localId == l.localId }] = updated
+            voices.add(0, v)
+            if (selectedVoiceId == null) selectVoice(v.id)
+            if (!quiet) message = "Uploaded \"${l.name}\". It's ready in the Generate tab."
+        } catch (e: Exception) {
+            if (!quiet) message = "Upload failed: ${e.message}"
+        } finally {
+            uploadingId = null
+        }
     }
 
     fun selectVoice(id: String?) {
@@ -157,23 +211,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("voice_id", id).apply()
     }
 
-    fun deleteVoice(v: Voice) = viewModelScope.launch {
+    fun deleteVoice(item: VoiceItem) = viewModelScope.launch {
         try {
-            api?.deleteVoice(v.id)
-            if (playingId == v.id) stopPlayback()
-            voices.remove(v)
-            if (selectedVoiceId == v.id) selectVoice(voices.firstOrNull()?.id)
+            item.server?.let { api?.deleteVoice(it.id) ?: throw ApiException("Not connected to the server") }
+            if (playingId == item.key) stopPlayback()
+            item.local?.let { store.delete(it); localVoices.remove(it) }
+            item.server?.let { voices.remove(it) }
+            if (voices.none { it.id == selectedVoiceId }) selectVoice(voices.firstOrNull()?.id)
         } catch (e: Exception) {
-            message = e.message
+            message = "Could not delete: ${e.message}"
         }
     }
 
     // ---------- sample ----------
 
+    fun prepareRecording() { readyToRecord = true }
+
     fun startRecording() {
         if (recording) return
         val r = Recorder().also { recorder = it }
+        readyToRecord = false
         recording = true
+        cancelled = false
         recordSeconds = 0.0
         viewModelScope.launch {
             val s = withContext(Dispatchers.IO) {
@@ -181,11 +240,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             recording = false
             recordLevel = 0f
+            if (cancelled) return@launch
             s.onSuccess { setSample(it, "Recording") }.onFailure { message = "Recording failed: ${it.message}" }
         }
     }
 
-    fun stopRecording() = recorder?.stop()
+    fun finishRecording() { recorder?.stop() }
+
+    /** Leaves the ready screen, or stops a recording and throws it away. */
+    fun cancelRecording() {
+        readyToRecord = false
+        cancelled = true
+        recorder?.stop()
+    }
 
     val selectedVoice get() = voices.firstOrNull { it.id == selectedVoiceId }
 
@@ -202,6 +269,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         sample = s
         sampleLabel = "$label · ${"%.1f".format(s.seconds)}s"
+        voiceName = randomVoiceName()
     }
 
     fun clearSample() {
@@ -216,17 +284,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (playingId == PLAY_PREVIEW) stopPlayback() else play(f, PLAY_PREVIEW)
     }
 
-    fun toggleVoiceSample(v: Voice) {
-        if (playingId == v.id) { stopPlayback(); return }
+    fun toggleVoiceSample(item: VoiceItem) {
+        if (playingId == item.key) { stopPlayback(); return }
+        val local = item.local?.let { store.wavFile(it.localId) }
+        if (local != null) { play(local, item.key); return }
+        val v = item.server ?: return
         val a = api ?: return
         val f = File(getApplication<Application>().cacheDir, "voice-${v.id}.wav")
         viewModelScope.launch {
             try {
                 if (!f.isFile) {
-                    loadingSampleId = v.id
+                    loadingSampleId = item.key
                     f.writeBytes(a.sample(v.id))
                 }
-                play(f, v.id)
+                play(f, item.key)
             } catch (e: Exception) {
                 message = "Could not play this sample: ${e.message}"
             } finally {
@@ -235,24 +306,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun cloneVoice() {
+    /** Saves the sample on the phone first, then uploads it if the server is reachable. */
+    fun saveVoice() {
         val s = sample ?: return
-        val a = api ?: return
         cloning = true
         viewModelScope.launch {
-            try {
-                val v = a.clone(s.toWav(), voiceName.trim(), transcript.trim())
-                voices.add(0, v)
-                selectVoice(v.id)
-                sample = null
-                voiceName = ""
-                transcript = ""
-                message = "Saved \"${v.name}\". It's ready in the Generate tab."
-            } catch (e: Exception) {
-                message = "Cloning failed: ${e.message}"
-            } finally {
-                cloning = false
+            val name = voiceName.trim().ifEmpty { randomVoiceName() }
+            val l = withContext(Dispatchers.IO) { store.add(s, name, transcript.trim()) }
+            localVoices.add(0, l)
+            if (playingId == PLAY_PREVIEW) stopPlayback()
+            sample = null
+            voiceName = ""
+            transcript = ""
+            if (modelReady && voicesLoaded) {
+                upload(l, quiet = true)
+                val saved = localVoices.first { it.localId == l.localId }
+                if (saved.serverId != null) {
+                    selectVoice(saved.serverId)
+                    message = "Saved \"$name\". It's ready in the Generate tab."
+                } else {
+                    message = "Saved \"$name\" on your phone. It will upload when the server is back."
+                }
+            } else {
+                message = "Saved \"$name\" on your phone. It will upload when the server is back."
             }
+            cloning = false
         }
     }
 
@@ -343,6 +421,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPlayback()
         recorder?.stop()
     }
+}
+
+/** A row in My voices: kept on the phone ([local]), on the server ([server]), or both. */
+data class VoiceItem(val key: String, val name: String, val duration: Double, val server: Voice?, val local: LocalVoice?) {
+    val canPlay get() = local != null || server?.hasSample == true
 }
 
 const val PLAY_RESULT = "result"

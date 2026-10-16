@@ -188,14 +188,24 @@ fun RecordCard(vm: MainViewModel) {
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) vm.startRecording() else vm.message = "Voice Studio needs the microphone to record a sample."
     }
-    fun record() {
+    fun start() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             vm.startRecording()
         else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     Section("Record a new voice") {
-        if (vm.recording) {
+        if (vm.readyToRecord) {
+            Text(
+                "Find a quiet spot. When you tap Start, read this aloud in your normal voice:",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(READ_ALOUD[vm.language].orEmpty(), style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = ::start) { Icon(Icons.Default.FiberManualRecord, null); Spacer(Modifier.width(6.dp)); Text("Start") }
+                OutlinedButton(onClick = vm::cancelRecording) { Text("Cancel") }
+            }
+        } else if (vm.recording) {
             Text("Read this aloud:", style = MaterialTheme.typography.labelLarge)
             Text(READ_ALOUD[vm.language].orEmpty(), style = MaterialTheme.typography.bodyLarge)
             LinearProgressIndicator(
@@ -207,14 +217,20 @@ fun RecordCard(vm: MainViewModel) {
                 "Recording ${"%.1f".format(vm.recordSeconds)}s / ${MAX_SAMPLE_SECONDS}s · 3 to 10 seconds works best",
                 style = MaterialTheme.typography.bodySmall,
             )
-            Button(
-                onClick = { vm.stopRecording() },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            ) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(6.dp)); Text("Done") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = vm::finishRecording,
+                    enabled = vm.recordSeconds >= MIN_SAMPLE_SECONDS,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(6.dp)); Text("Done") }
+                OutlinedButton(onClick = vm::cancelRecording) {
+                    Icon(Icons.Default.Close, null); Spacer(Modifier.width(6.dp)); Text("Cancel")
+                }
+            }
         } else if (vm.sample == null) {
             Text("Record yourself for 3 to 10 seconds, or pick an existing voice sample.", style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = ::record) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(6.dp)); Text("Record") }
+                Button(onClick = vm::prepareRecording) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(6.dp)); Text("Record") }
                 OutlinedButton(onClick = { picker.launch("audio/*") }) {
                     Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(6.dp)); Text("Pick a file")
                 }
@@ -230,14 +246,17 @@ fun RecordCard(vm: MainViewModel) {
             }
             OutlinedTextField(
                 vm.voiceName, { vm.voiceName = it }, Modifier.fillMaxWidth(),
-                label = { Text("Voice name") }, placeholder = { Text("e.g. My voice") }, singleLine = true,
+                label = { Text("Voice name") }, singleLine = true,
+                trailingIcon = {
+                    IconButton(onClick = { vm.voiceName = randomVoiceName() }) { Icon(Icons.Default.Casino, "Pick another name") }
+                },
             )
             OutlinedTextField(
                 vm.transcript, { vm.transcript = it }, Modifier.fillMaxWidth(),
                 label = { Text("What the sample says (optional)") },
                 supportingText = { Text("Leave empty to transcribe it automatically.") },
             )
-            Button(onClick = vm::cloneVoice, enabled = vm.modelReady && !vm.cloning, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = vm::saveVoice, enabled = !vm.cloning, modifier = Modifier.fillMaxWidth()) {
                 if (vm.cloning) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                     Spacer(Modifier.width(8.dp)); Text("Saving…")
@@ -252,24 +271,31 @@ fun RecordCard(vm: MainViewModel) {
 @Composable
 fun MyVoicesCard(vm: MainViewModel) {
     Section("My voices") {
-        if (vm.voices.isEmpty()) {
+        val items = vm.myVoices
+        if (items.isEmpty()) {
             Text("No saved voices yet. Record one above.", style = MaterialTheme.typography.bodyMedium)
         }
-        vm.voices.forEachIndexed { i, v ->
+        items.forEachIndexed { i, v ->
             if (i > 0) HorizontalDivider()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(v.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (v.hasSample) "${"%.1f".format(v.duration)}s sample" else "${"%.1f".format(v.duration)}s · sample not kept",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    val where = when {
+                        v.local != null && vm.uploadingId == v.local.localId -> "Uploading…"
+                        v.local != null && v.local.serverId == null -> "On this phone · not uploaded yet"
+                        v.local == null && v.server?.hasSample != true -> "Sample not kept"
+                        else -> "Ready"
+                    }
+                    Text("${"%.1f".format(v.duration)}s · $where", style = MaterialTheme.typography.bodySmall)
                 }
-                if (v.hasSample) {
+                if (v.local != null && v.local.serverId == null && vm.uploadingId == null && vm.modelReady) {
+                    IconButton(onClick = { vm.upload(v) }) { Icon(Icons.Default.CloudUpload, "Upload ${v.name}") }
+                }
+                if (v.canPlay) {
                     IconButton(onClick = { vm.toggleVoiceSample(v) }) {
                         when {
-                            vm.loadingSampleId == v.id -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                            vm.playingId == v.id -> Icon(Icons.Default.Stop, "Stop ${v.name}")
+                            vm.loadingSampleId == v.key -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            vm.playingId == v.key -> Icon(Icons.Default.Stop, "Stop ${v.name}")
                             else -> Icon(Icons.Default.PlayArrow, "Play ${v.name}")
                         }
                     }
@@ -279,6 +305,7 @@ fun MyVoicesCard(vm: MainViewModel) {
                 if (confirm) AlertDialog(
                     onDismissRequest = { confirm = false },
                     title = { Text("Delete \"${v.name}\"?") },
+                    text = { Text("This removes it from your phone and the server.") },
                     confirmButton = { TextButton(onClick = { confirm = false; vm.deleteVoice(v) }) { Text("Delete") } },
                     dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
                 )

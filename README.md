@@ -86,6 +86,8 @@ The `android/` folder has a phone app (Kotlin + Jetpack Compose) with the same f
 1. Start the server as usual with `./start.sh`. It listens on your Wi-Fi and prints the address phones can use.
 2. Put the phone on the same Wi-Fi, open the app and tap **Find on Wi-Fi** (or type your computer's address, like `192.168.1.20:7860`).
 
+Voices you record on the phone are saved on the phone first, so nothing is lost if the server is off. They upload on their own once the app can reach the server again.
+
 Over a USB cable you can skip the Wi-Fi step: run `adb reverse tcp:7860 tcp:7860` and the app finds the server on its own.
 
 To build and install it yourself (needs JDK 17 or 21 and the Android SDK):
