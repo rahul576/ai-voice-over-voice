@@ -80,7 +80,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var resultInfo by mutableStateOf("")
         private set
-    var playing by mutableStateOf(false)
+    /** What is playing: [PLAY_RESULT], [PLAY_PREVIEW], or a voice id for its saved sample. */
+    var playingId by mutableStateOf<String?>(null)
+        private set
+    var loadingSampleId by mutableStateOf<String?>(null)
         private set
 
     var message by mutableStateOf<String?>(null)
@@ -157,6 +160,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteVoice(v: Voice) = viewModelScope.launch {
         try {
             api?.deleteVoice(v.id)
+            if (playingId == v.id) stopPlayback()
             voices.remove(v)
             if (selectedVoiceId == v.id) selectVoice(voices.firstOrNull()?.id)
         } catch (e: Exception) {
@@ -183,6 +187,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopRecording() = recorder?.stop()
 
+    val selectedVoice get() = voices.firstOrNull { it.id == selectedVoiceId }
+
     fun pickFile(uri: Uri) = viewModelScope.launch {
         val s = withContext(Dispatchers.IO) { runCatching { decodeAudio(getApplication(), uri) } }
         s.onSuccess { setSample(it, "Uploaded file") }
@@ -198,13 +204,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sampleLabel = "$label · ${"%.1f".format(s.seconds)}s"
     }
 
-    fun clearSample() { sample = null }
+    fun clearSample() {
+        if (playingId == PLAY_PREVIEW) stopPlayback()
+        sample = null
+    }
 
     fun previewSample() {
         val s = sample ?: return
         val f = File(getApplication<Application>().cacheDir, "sample.wav")
         f.writeBytes(s.toWav())
-        play(f)
+        if (playingId == PLAY_PREVIEW) stopPlayback() else play(f, PLAY_PREVIEW)
+    }
+
+    fun toggleVoiceSample(v: Voice) {
+        if (playingId == v.id) { stopPlayback(); return }
+        val a = api ?: return
+        val f = File(getApplication<Application>().cacheDir, "voice-${v.id}.wav")
+        viewModelScope.launch {
+            try {
+                if (!f.isFile) {
+                    loadingSampleId = v.id
+                    f.writeBytes(a.sample(v.id))
+                }
+                play(f, v.id)
+            } catch (e: Exception) {
+                message = "Could not play this sample: ${e.message}"
+            } finally {
+                loadingSampleId = null
+            }
+        }
     }
 
     fun cloneVoice() {
@@ -219,7 +247,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 sample = null
                 voiceName = ""
                 transcript = ""
-                message = "Voice \"${v.name}\" is ready."
+                message = "Saved \"${v.name}\". It's ready in the Generate tab."
             } catch (e: Exception) {
                 message = "Cloning failed: ${e.message}"
             } finally {
@@ -276,7 +304,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 resultFile = f
                 resultInfo = "Generated in ${formatSeconds(took)}"
                 progress = 1f
-                play(f)
+                play(f, PLAY_RESULT)
                 runCatching { status = a.status() } // picks up the refined time estimate
             } catch (e: Exception) {
                 message = "Generation failed: ${e.message}"
@@ -291,24 +319,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun togglePlay() {
         val f = resultFile ?: return
-        if (playing) stopPlayback() else play(f)
+        if (playingId == PLAY_RESULT) stopPlayback() else play(f, PLAY_RESULT)
     }
 
-    private fun play(f: File) {
+    private fun play(f: File, id: String) {
         stopPlayback()
         player = MediaPlayer().apply {
             setDataSource(f.absolutePath)
-            setOnCompletionListener { playing = false }
+            setOnCompletionListener { playingId = null }
             prepare()
             start()
         }
-        playing = true
+        playingId = id
     }
 
-    private fun stopPlayback() {
+    fun stopPlayback() {
         player?.release()
         player = null
-        playing = false
+        playingId = null
     }
 
     override fun onCleared() {
@@ -316,6 +344,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         recorder?.stop()
     }
 }
+
+const val PLAY_RESULT = "result"
+const val PLAY_PREVIEW = "preview"
 
 fun formatSeconds(s: Double): String =
     if (s < 60) "${s.toInt().coerceAtLeast(1)}s" else "${(s / 60).toInt()}m ${(s % 60).toInt()}s"

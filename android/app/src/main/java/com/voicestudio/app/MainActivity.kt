@@ -14,7 +14,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,15 +73,28 @@ fun VoiceStudioScreen(vm: MainViewModel) {
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->
-        Column(
-            Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).imePadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (vm.status == null) ConnectCard(vm)
-            CloneCard(vm)
-            SpeakCard(vm)
-            Spacer(Modifier.height(24.dp))
+        var tab by rememberSaveable { mutableIntStateOf(0) }
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            TabRow(selectedTabIndex = tab) {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Record voice") },
+                    icon = { Icon(Icons.Default.Mic, null) })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Generate") },
+                    icon = { Icon(Icons.Default.GraphicEq, null) })
+            }
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (vm.status == null) ConnectCard(vm)
+                if (tab == 0) {
+                    RecordCard(vm)
+                    MyVoicesCard(vm)
+                } else {
+                    SpeakCard(vm)
+                }
+                Spacer(Modifier.height(24.dp))
+            }
         }
     }
     if (showSettings) SettingsDialog(vm) { showSettings = false }
@@ -167,7 +180,7 @@ fun SettingsDialog(vm: MainViewModel, onClose: () -> Unit) {
 }
 
 @Composable
-fun CloneCard(vm: MainViewModel) {
+fun RecordCard(vm: MainViewModel) {
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let(vm::pickFile)
@@ -181,7 +194,7 @@ fun CloneCard(vm: MainViewModel) {
         else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    Section("1. Clone a voice") {
+    Section("Record a new voice") {
         if (vm.recording) {
             Text("Read this aloud:", style = MaterialTheme.typography.labelLarge)
             Text(READ_ALOUD[vm.language].orEmpty(), style = MaterialTheme.typography.bodyLarge)
@@ -197,7 +210,7 @@ fun CloneCard(vm: MainViewModel) {
             Button(
                 onClick = { vm.stopRecording() },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            ) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(6.dp)); Text("Stop") }
+            ) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(6.dp)); Text("Done") }
         } else if (vm.sample == null) {
             Text("Record yourself for 3 to 10 seconds, or pick an existing voice sample.", style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -207,14 +220,17 @@ fun CloneCard(vm: MainViewModel) {
                 }
             }
         } else {
+            Text("Listen back, give it a name, then save it.", style = MaterialTheme.typography.bodyMedium)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = vm::previewSample) { Icon(Icons.Default.PlayArrow, "Play sample") }
-                Text(vm.sampleLabel, Modifier.weight(1f))
-                IconButton(onClick = vm::clearSample) { Icon(Icons.Default.Close, "Discard sample") }
+                FilledTonalIconButton(onClick = vm::previewSample) {
+                    Icon(if (vm.playingId == PLAY_PREVIEW) Icons.Default.Stop else Icons.Default.PlayArrow, "Play sample")
+                }
+                Text(vm.sampleLabel, Modifier.weight(1f).padding(start = 8.dp))
+                TextButton(onClick = vm::clearSample, enabled = !vm.cloning) { Text("Discard") }
             }
             OutlinedTextField(
                 vm.voiceName, { vm.voiceName = it }, Modifier.fillMaxWidth(),
-                label = { Text("Voice name (optional)") }, singleLine = true,
+                label = { Text("Voice name") }, placeholder = { Text("e.g. My voice") }, singleLine = true,
             )
             OutlinedTextField(
                 vm.transcript, { vm.transcript = it }, Modifier.fillMaxWidth(),
@@ -224,33 +240,73 @@ fun CloneCard(vm: MainViewModel) {
             Button(onClick = vm::cloneVoice, enabled = vm.modelReady && !vm.cloning, modifier = Modifier.fillMaxWidth()) {
                 if (vm.cloning) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
-                    Spacer(Modifier.width(8.dp)); Text("Cloning…")
-                } else Text("Clone this voice")
+                    Spacer(Modifier.width(8.dp)); Text("Saving…")
+                } else {
+                    Icon(Icons.Default.Save, null); Spacer(Modifier.width(6.dp)); Text("Save this voice")
+                }
             }
         }
+    }
+}
 
-        if (vm.voices.isNotEmpty()) {
-            HorizontalDivider()
-            Text("My voices", style = MaterialTheme.typography.labelLarge)
-            vm.voices.forEach { v ->
-                Row(
-                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable { vm.selectVoice(v.id) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = vm.selectedVoiceId == v.id, onClick = { vm.selectVoice(v.id) })
-                    Column(Modifier.weight(1f)) {
-                        Text(v.name)
-                        Text("${"%.1f".format(v.duration)}s sample", style = MaterialTheme.typography.bodySmall)
-                    }
-                    var confirm by remember { mutableStateOf(false) }
-                    IconButton(onClick = { confirm = true }) { Icon(Icons.Default.Delete, "Delete ${v.name}") }
-                    if (confirm) AlertDialog(
-                        onDismissRequest = { confirm = false },
-                        title = { Text("Delete \"${v.name}\"?") },
-                        confirmButton = { TextButton(onClick = { confirm = false; vm.deleteVoice(v) }) { Text("Delete") } },
-                        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+@Composable
+fun MyVoicesCard(vm: MainViewModel) {
+    Section("My voices") {
+        if (vm.voices.isEmpty()) {
+            Text("No saved voices yet. Record one above.", style = MaterialTheme.typography.bodyMedium)
+        }
+        vm.voices.forEachIndexed { i, v ->
+            if (i > 0) HorizontalDivider()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(v.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (v.hasSample) "${"%.1f".format(v.duration)}s sample" else "${"%.1f".format(v.duration)}s · sample not kept",
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                if (v.hasSample) {
+                    IconButton(onClick = { vm.toggleVoiceSample(v) }) {
+                        when {
+                            vm.loadingSampleId == v.id -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            vm.playingId == v.id -> Icon(Icons.Default.Stop, "Stop ${v.name}")
+                            else -> Icon(Icons.Default.PlayArrow, "Play ${v.name}")
+                        }
+                    }
+                }
+                var confirm by remember { mutableStateOf(false) }
+                IconButton(onClick = { confirm = true }) { Icon(Icons.Default.Delete, "Delete ${v.name}") }
+                if (confirm) AlertDialog(
+                    onDismissRequest = { confirm = false },
+                    title = { Text("Delete \"${v.name}\"?") },
+                    confirmButton = { TextButton(onClick = { confirm = false; vm.deleteVoice(v) }) { Text("Delete") } },
+                    dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VoicePicker(vm: MainViewModel) {
+    var open by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it && vm.voices.isNotEmpty() }) {
+        OutlinedTextField(
+            value = vm.selectedVoice?.name ?: if (vm.voices.isEmpty()) "No voices yet" else "Choose a voice",
+            onValueChange = {}, readOnly = true, singleLine = true,
+            label = { Text("Voice") },
+            leadingIcon = { Icon(Icons.Default.RecordVoiceOver, null) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            vm.voices.forEach { v ->
+                DropdownMenuItem(
+                    text = { Text(v.name) },
+                    trailingIcon = { Text("${"%.1f".format(v.duration)}s", style = MaterialTheme.typography.bodySmall) },
+                    onClick = { vm.selectVoice(v.id); open = false },
+                )
             }
         }
     }
@@ -260,7 +316,8 @@ fun CloneCard(vm: MainViewModel) {
 @Composable
 fun SpeakCard(vm: MainViewModel) {
     val context = LocalContext.current
-    Section("2. Make it speak") {
+    Section("Generate speech") {
+        VoicePicker(vm)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             LANGUAGES.entries.forEachIndexed { i, (code, label) ->
                 SegmentedButton(
@@ -298,14 +355,14 @@ fun SpeakCard(vm: MainViewModel) {
             Text(if (vm.generating) "Generating…" else "Generate speech")
         }
         if (vm.selectedVoiceId == null && vm.status != null) {
-            Text("Clone a voice first.", style = MaterialTheme.typography.bodySmall)
+            Text("Record a voice in the Record voice tab first.", style = MaterialTheme.typography.bodySmall)
         }
 
         vm.resultFile?.let { file ->
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FilledTonalIconButton(onClick = vm::togglePlay) {
-                    Icon(if (vm.playing) Icons.Default.Stop else Icons.Default.PlayArrow, "Play result")
+                    Icon(if (vm.playingId == PLAY_RESULT) Icons.Default.Stop else Icons.Default.PlayArrow, "Play result")
                 }
                 Text(vm.resultInfo, Modifier.weight(1f).padding(start = 8.dp))
                 IconButton(onClick = {

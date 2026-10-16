@@ -227,6 +227,7 @@ def create_app(engine: TTSEngine) -> FastAPI:
             except (OSError, ValueError):
                 continue
             if (VOICES_DIR / f"{data.get('id')}.pt").is_file():
+                data["has_sample"] = (VOICES_DIR / f"{data['id']}.wav").is_file()
                 items.append(data)
         items.sort(key=lambda v: v.get("created", 0), reverse=True)
         return items
@@ -245,6 +246,8 @@ def create_app(engine: TTSEngine) -> FastAPI:
         prompt = engine.clone(wav, sr, transcript.strip())
         voice_id = uuid.uuid4().hex[:12]
         prompt.save(str(VOICES_DIR / f"{voice_id}.pt"))
+        # Keep the reference clip so it can be played back from My voices.
+        sf.write(str(VOICES_DIR / f"{voice_id}.wav"), wav, sr, subtype="PCM_16")
         meta = {
             "id": voice_id,
             "name": name.strip()[:40] or f"Voice {time.strftime('%d %b %H:%M')}",
@@ -254,7 +257,14 @@ def create_app(engine: TTSEngine) -> FastAPI:
         }
         voice_meta_path(voice_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         voices[voice_id] = {"prompt": prompt}
-        return meta
+        return {**meta, "has_sample": True}
+
+    @app.get("/api/voices/{voice_id}/sample")
+    def voice_sample(voice_id: str):
+        path = VOICES_DIR / f"{voice_id}.wav"
+        if not voice_id.isalnum() or not path.is_file():
+            raise HTTPException(404, "No sample saved for this voice.")
+        return FileResponse(path, media_type="audio/wav")
 
     @app.delete("/api/voices/{voice_id}")
     def delete_voice(voice_id: str):
@@ -263,6 +273,7 @@ def create_app(engine: TTSEngine) -> FastAPI:
             raise HTTPException(404, "Voice not found.")
         meta.unlink()
         (VOICES_DIR / f"{voice_id}.pt").unlink(missing_ok=True)
+        (VOICES_DIR / f"{voice_id}.wav").unlink(missing_ok=True)
         voices.pop(voice_id, None)
         return {"ok": True}
 

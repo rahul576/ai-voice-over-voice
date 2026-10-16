@@ -30,7 +30,13 @@ data class ServerStatus(
     val perChar: Double,
 )
 
-data class Voice(val id: String, val name: String, val transcript: String, val duration: Double)
+data class Voice(
+    val id: String,
+    val name: String,
+    val transcript: String,
+    val duration: Double,
+    val hasSample: Boolean,
+)
 
 class ApiException(message: String) : IOException(message)
 
@@ -76,6 +82,11 @@ class Api(baseUrl: String) {
         call(Request.Builder().url("$baseUrl/api/voices/$id").delete().build()).close()
     }
 
+    /** The recorded clip a voice was cloned from. */
+    suspend fun sample(id: String): ByteArray = withContext(Dispatchers.IO) {
+        call(Request.Builder().url("$baseUrl/api/voices/$id/sample").build()).bytes()
+    }
+
     suspend fun speak(voiceId: String, text: String, language: String, speed: Float): ByteArray =
         withContext(Dispatchers.IO) {
             val json = JSONObject()
@@ -92,6 +103,7 @@ class Api(baseUrl: String) {
         name = o.optString("name"),
         transcript = o.optString("transcript"),
         duration = o.optDouble("duration", 0.0),
+        hasSample = o.optBoolean("has_sample", false),
     )
 
     private fun call(req: Request): okhttp3.ResponseBody {
