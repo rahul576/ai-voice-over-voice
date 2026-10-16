@@ -78,3 +78,19 @@ voices/              Saved cloned voices (created at runtime, git-ignored)
 ```
 
 Run the tests with `pip install pytest httpx && python -m pytest`.
+
+## Android app
+
+The `android/` folder has a phone app (Kotlin + Jetpack Compose) with the same features: record live or pick a sample, English or Hindi, editable text, speed and a progress bar with the estimated time. The model is too heavy for a phone, so the app sends the work to Voice Studio running on your computer.
+
+1. Start the server so the phone can reach it: `./start.sh --host 0.0.0.0`
+2. Put the phone on the same Wi-Fi, open the app and tap **Find on Wi-Fi** (or type your computer's address, like `192.168.1.20:7860`).
+
+Over a USB cable you can skip the Wi-Fi step: run `adb reverse tcp:7860 tcp:7860` and the app finds the server on its own.
+
+To build and install it yourself (needs JDK 17 or 21 and the Android SDK):
+
+```bash
+cd android
+./gradlew installDebug
+```
