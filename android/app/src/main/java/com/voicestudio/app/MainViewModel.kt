@@ -76,6 +76,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var cloning by mutableStateOf(false)
         private set
     var voiceName by mutableStateOf("")
+    /** Language of the passage shown to read aloud while recording. */
+    var readLanguage by mutableStateOf(prefs.getString("read_language", null) ?: prefs.getString("language", "en") ?: "en")
+        private set
     var denoise by mutableStateOf(true)
     var cleaning by mutableStateOf(false)
         private set
@@ -234,6 +237,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- sample ----------
 
     fun prepareRecording() { readyToRecord = true }
+
+    fun chooseReadLanguage(code: String) {
+        readLanguage = code
+        prefs.edit().putString("read_language", code).apply()
+    }
 
     fun startRecording() {
         if (recording) return

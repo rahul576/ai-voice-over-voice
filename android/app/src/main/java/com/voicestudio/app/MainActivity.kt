@@ -199,17 +199,18 @@ fun RecordCard(vm: MainViewModel) {
     Section("Record a new voice") {
         if (vm.readyToRecord) {
             Text(
-                "Find a quiet spot. When you tap Start, read this aloud in your normal voice:",
+                if (vm.readLanguage == "hi") "शांत जगह चुनें। Start दबाकर इसे अपनी सामान्य आवाज़ में पढ़ें:"
+                else "Find a quiet spot. When you tap Start, read this aloud in your normal voice:",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Text(READ_ALOUD[vm.language].orEmpty(), style = MaterialTheme.typography.bodyLarge)
+            ReadAloudPassage(vm)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = ::start) { Icon(Icons.Default.FiberManualRecord, null); Spacer(Modifier.width(6.dp)); Text("Start") }
                 OutlinedButton(onClick = vm::cancelRecording) { Text("Cancel") }
             }
         } else if (vm.recording) {
-            Text("Read this aloud:", style = MaterialTheme.typography.labelLarge)
-            Text(READ_ALOUD[vm.language].orEmpty(), style = MaterialTheme.typography.bodyLarge)
+            Text(if (vm.readLanguage == "hi") "इसे ज़ोर से पढ़ें:" else "Read this aloud:", style = MaterialTheme.typography.labelLarge)
+            ReadAloudPassage(vm)
             LinearProgressIndicator(
                 progress = { vm.recordLevel.coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth(),
@@ -290,6 +291,21 @@ fun RecordCard(vm: MainViewModel) {
             }
         }
     }
+}
+
+/** The text to read while recording, in English or Hindi, so anyone can record a sample. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReadAloudPassage(vm: MainViewModel) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        LANGUAGES.entries.forEachIndexed { i, (code, label) ->
+            SegmentedButton(
+                selected = vm.readLanguage == code, onClick = { vm.chooseReadLanguage(code) },
+                shape = SegmentedButtonDefaults.itemShape(i, LANGUAGES.size),
+            ) { Text(label) }
+        }
+    }
+    Text(READ_ALOUD[vm.readLanguage].orEmpty(), style = MaterialTheme.typography.bodyLarge)
 }
 
 @Composable
