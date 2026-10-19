@@ -1,0 +1,9 @@
+# Install PyTorch for your hardware first (see README), then:
+omnivoice>=0.2.1
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+soundfile
+numpy
+noisereduce>=3.0
+scipy
